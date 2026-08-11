@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  /* F1 Racing Dark Theme */
+  --bg-dark: #0d0d14;
+  --bg-sidebar: #0f0f18;
+  --bg-card: #141420;
+  --border-card: rgba(255, 255, 255, 0.05);
+  
+  /* Accents */
+  --accent-red: #e74c3c;
+  --accent-orange: #e67e22;
+  --accent-yellow: #f1c40f;
+  --accent-teal: #1abc9c;
+  --accent-green: #2ecc71;
+  
+  /* Text */
+  --text-primary: #e8e8f0;
+  --text-secondary: #6b6b85;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  overflow: hidden; /* App handles its own layout/scroll */
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-primary);
+}
+
+.app-container {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  width: 100vw;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2), 0 0 10px rgba(255,255,255,0.02);
+}
+
+/* Utility Animations */
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+}
+.pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "clip_1",
+    "name": "Calm Update",
+    "description": "Driver gives a calm update on pace.",
+    "driver": "VER",
+    "lap_number": 12,
+    "expected_stress": "LOW",
+    "transcript": "Box this lap, tyres are fine, pace is good",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_1.wav"
+  },
+  {
+    "id": "clip_2",
+    "name": "Moderate Concern",
+    "description": "Driver notes tyre degradation.",
+    "driver": "VER",
+    "lap_number": 18,
+    "expected_stress": "MODERATE",
+    "transcript": "Rear tyres starting to go off, losing grip through Turn 4",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_2.wav"
+  },
+  {
+    "id": "clip_3",
+    "name": "High Stress",
+    "description": "Driver struggles with car balance.",
+    "driver": "VER",
+    "lap_number": 24,
+    "expected_stress": "HIGH",
+    "transcript": "I'm losing the rear! The car is undriveable in the high speed!",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_3.wav"
+  },
+  {
+    "id": "clip_4",
+    "name": "Critical Failure",
+    "description": "Sudden power loss.",
+    "driver": "VER",
+    "lap_number": 25,
+    "expected_stress": "CRITICAL",
+    "transcript": "NO POWER! NO POWER! Something's broken!",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_4.wav"
+  },
+  {
+    "id": "clip_5",
+    "name": "Frustrated Pace",
+    "description": "Driver complaining about pace.",
+    "driver": "NOR",
+    "lap_number": 35,
+    "expected_stress": "HIGH",
+    "transcript": "Why are we so slow?! We're losing time every lap!",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_5.wav"
+  },
+  {
+    "id": "clip_6",
+    "name": "Pit Strategy Urgent",
+    "description": "Urgent call to pit.",
+    "driver": "NOR",
+    "lap_number": 40,
+    "expected_stress": "MODERATE",
+    "transcript": "We need to pit NOW, these tyres are completely gone",
+    "file_path": "/Users/devyanichavan/Documents/Pitwall/backend/static/clips/clip_6.wav"
+  }
+]
