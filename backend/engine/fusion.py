@@ -11,6 +11,7 @@ from models.asr import ASREngine
 from models.acoustic import AcousticAnalyzer
 from dsp.prosody import ProsodyAnalyzer
 from nlp.transcript_analyzer import TranscriptAnalyzer
+from engine.recommendations import generate_recommendations
 
 class DriverStateEngine:
     """Driver State Fusion Engine singleton with Hugging Face integration and Time-Series Windowing."""
@@ -148,9 +149,17 @@ class DriverStateEngine:
         )
         
         timestamp = datetime.datetime.now().isoformat()
-        confidence = float(min(1.0, max(0.65, (100 - stress_score)/100 + 0.35)))
+        # Honest confidence: mean word-level probability from Whisper (0.5 if hint was used)
+        confidence = float(asr_result.get('confidence') or 0.0)
+        if transcript and confidence == 0.0:
+            confidence = 0.5  # transcript came from a hint, not ASR
         
+        recommendations = generate_recommendations(
+            stress_score, frustration_score, fatigue_score, mental_load_score, nlp_result
+        )
+
         state = {
+            'recommendations': recommendations,
             'stress_score': stress_score,
             'stress_level': stress_level,
             'frustration_score': frustration_score,
@@ -195,52 +204,88 @@ class DriverStateEngine:
             
         return state
 
-    def _generate_time_series(self, audio_array, sample_rate, duration_sec, 
+    def _generate_time_series(self, audio_array, sample_rate, duration_sec,
                                base_stress, base_frust, base_fatigue, base_mental,
                                segments, transcript):
-        """Generates continuous windowed time series points for live audio motion."""
-        points = []
+        """Windowed time series driven by REAL per-window signal features.
+
+        For each 0.25s step we measure vocal energy (RMS) and pitch, compare
+        them to the clip's own voiced average, and modulate the fused base
+        scores by that deviation. Louder / higher-pitched moments raise
+        stress, frustration and mental load; low-energy stretches nudge
+        fatigue up. No synthetic oscillation.
+        """
         step_sec = 0.25
-        window_size = int(sample_rate * 0.8)
+        win_sec = 0.8
+        window_size = int(sample_rate * win_sec)
         total_samples = len(audio_array)
-        
+
+        # Window grid
+        times = []
         t = 0.0
-        idx = 0
         while t <= duration_sec:
-            start_sample = int(t * sample_rate)
-            end_sample = min(total_samples, start_sample + window_size)
-            
-            chunk = audio_array[start_sample:end_sample]
-            if len(chunk) > 100:
-                rms = float(np.sqrt(np.mean(chunk**2)))
-                rms_norm = min(rms / 0.1, 1.5)
+            times.append(t)
+            t += step_sec
+        if not times:
+            return []
+
+        # Per-window RMS energy (real)
+        rms_vals = []
+        for ti in times:
+            start = int(ti * sample_rate)
+            end = min(total_samples, start + window_size)
+            chunk = audio_array[start:end]
+            rms_vals.append(float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 100 else 0.0)
+        rms_arr = np.array(rms_vals)
+
+        # Per-window pitch from a single Praat pitch track (real)
+        pitch_arr = np.zeros(len(times))
+        try:
+            import parselmouth
+            snd = parselmouth.Sound(audio_array, sampling_frequency=sample_rate)
+            pitch_track = snd.to_pitch(time_step=step_sec)
+            for i, ti in enumerate(times):
+                v = pitch_track.get_value_at_time(min(ti + win_sec / 2, duration_sec))
+                pitch_arr[i] = 0.0 if (v is None or np.isnan(v)) else float(v)
+        except Exception:
+            pass  # pitch stays zero; RMS alone still drives the modulation
+
+        # Deviations relative to the clip's own voiced averages
+        voiced_rms = rms_arr[rms_arr > 0]
+        rms_mean = float(voiced_rms.mean()) if len(voiced_rms) else 1.0
+        voiced_pitch = pitch_arr[pitch_arr > 0]
+        pitch_mean = float(voiced_pitch.mean()) if len(voiced_pitch) else 0.0
+
+        points = []
+        for i, ti in enumerate(times):
+            rms_dev = (rms_arr[i] - rms_mean) / (rms_mean + 1e-9)
+            if pitch_mean > 0 and pitch_arr[i] > 0:
+                pitch_dev = (pitch_arr[i] - pitch_mean) / pitch_mean
             else:
-                rms_norm = 0.2
-                
-            var_factor = (np.sin(t * 3.5) * 0.15 + (rms_norm - 0.5) * 0.3)
-            
-            s_val = min(100, max(10, base_stress * (1.0 + var_factor)))
-            fr_val = min(100, max(10, base_frust * (1.0 + var_factor * 0.8)))
-            fa_val = min(100, max(10, base_fatigue * (1.0 + np.cos(t * 1.5) * 0.1)))
-            ml_val = min(100, max(10, base_mental * (1.0 + var_factor * 0.6)))
-            
+                pitch_dev = 0.0
+
+            # Combined vocal-effort deviation, bounded
+            mod = float(np.clip(0.5 * rms_dev + 0.5 * pitch_dev, -0.35, 0.35))
+
+            s_val = float(np.clip(base_stress * (1.0 + mod), 0, 100))
+            fr_val = float(np.clip(base_frust * (1.0 + 0.8 * mod), 0, 100))
+            fa_val = float(np.clip(base_fatigue * (1.0 - 0.5 * mod), 0, 100))
+            ml_val = float(np.clip(base_mental * (1.0 + 0.6 * mod), 0, 100))
+
             active_text = transcript
             if segments:
-                active_parts = [seg['text'] for seg in segments if seg['start'] <= t]
+                active_parts = [seg['text'] for seg in segments if seg['start'] <= ti]
                 if active_parts:
                     active_text = " ".join(active_parts)
-                    
+
             points.append({
-                'time': round(t, 2),
+                'time': round(ti, 2),
                 'stress': round(s_val, 1),
                 'frustration': round(fr_val, 1),
                 'fatigue': round(fa_val, 1),
                 'mental_load': round(ml_val, 1),
                 'active_text': active_text
             })
-            
-            t += step_sec
-            idx += 1
 
         return points
 

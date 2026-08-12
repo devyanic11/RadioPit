@@ -1,12 +1,27 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Play, Pause, Rewind, FastForward, Repeat, UploadCloud, Mic, Subtitles } from 'lucide-react';
+import { Play, Pause, Rewind, FastForward, Repeat, UploadCloud, Mic, Subtitles, Radio } from 'lucide-react';
 
-const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress, onLiveSpeechUpdate }) => {
+const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress, onLiveSpeechUpdate, clips = [], sessionLabel, onClipSelect, apiBase }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [activeClipId, setActiveClipId] = useState(null);
+  const [activeSession, setActiveSession] = useState(null);
+
+  // Distinct race sessions present in the clip library
+  const sessions = [];
+  clips.forEach(c => {
+    if (!sessions.find(s => s.key === c.session_key)) {
+      sessions.push({ key: c.session_key, label: c.session_label || 'Session' });
+    }
+  });
+  const currentSession = activeSession != null && sessions.find(s => s.key === activeSession)
+    ? activeSession
+    : (sessions[0]?.key ?? null);
+  const visibleClips = sessions.length > 1 ? clips.filter(c => c.session_key === currentSession) : clips;
+  const shortLabel = (label) => (label || '').replace(/^\d{4}\s*/, '').replace(/\s*Race$/i, '') || 'Session';
   
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
@@ -146,41 +161,11 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
     }
   };
 
-  // TRUE 0MS INSTANT PLAYBACK & REAL-TIME SPEECH STREAMING
+  // Instant playback; real transcript arrives from Whisper (backend) — no fabricated subtitles.
   const processFile = async (file) => {
     const url = URL.createObjectURL(file);
 
-    // 1. Instantly decode audio buffer locally in browser JS (0ms delay)
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer);
-      const audioDur = decodedBuffer.duration;
-
-      // Extract file name or fallback text to create instant word timestamps
-      const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-      const sampleText = (cleanName && cleanName.length > 4) ? cleanName : "The rear is stepping out on Turn 7 no grip";
-      const words = sampleText.split(/\s+/);
-      const step = audioDur / Math.max(words.length, 1);
-      
-      const instantWordTs = words.map((w, idx) => ({
-        word: w,
-        start: roundTwo(idx * step),
-        end: roundTwo((idx + 1) * step)
-      }));
-
-      if (onLiveSpeechUpdate) {
-        onLiveSpeechUpdate({
-          transcript: sampleText,
-          word_timestamps: instantWordTs,
-          confidence: 94
-        });
-      }
-    } catch(e) {
-      console.log("Local audio decode exception:", e);
-    }
-    
-    // 2. Play audio IMMEDIATELY (0ms delay)
+    // 1. Play audio immediately
     if (audioRef.current) {
       audioRef.current.src = url;
       audioRef.current.load();
@@ -191,13 +176,33 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
       }).catch(err => console.log("Auto-play permission:", err));
     }
 
-    // 3. Send to backend asynchronously to refine Hugging Face Whisper ASR + emotion metrics
+    // 2. Send to backend: Whisper ASR + emotion pipeline (subtitles show real words when ready)
     if (onAudioUpload) {
       onAudioUpload(file);
     }
   };
 
-  const roundTwo = (val) => Math.round(val * 100) / 100;
+  // Play a real F1 radio clip from the library and trigger backend analysis
+  const playClip = (clip) => {
+    setActiveClipId(clip.id);
+    if (audioRef.current) {
+      audioRef.current.src = `${apiBase}/api/sample-clips/${clip.id}/audio`;
+      audioRef.current.load();
+      try { initAudioVisualizer(); } catch(e){}
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+        drawWaveform();
+      }).catch(err => console.log("Clip play:", err));
+    }
+    if (onClipSelect) onClipSelect(clip);
+  };
+
+  const formatLapTime = (secs) => {
+    if (!secs) return null;
+    const m = Math.floor(secs / 60);
+    const s = (secs % 60).toFixed(3);
+    return `${m}:${s.padStart(6, '0')}`;
+  };
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -313,13 +318,75 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
       </div>
       
       <input type="file" ref={fileInputRef} onChange={handleFileInput} accept="audio/*" style={{ display: 'none' }} />
-      <audio 
-        ref={audioRef} 
-        onTimeUpdate={handleTimeUpdate} 
+      <audio
+        ref={audioRef}
+        crossOrigin="anonymous"
+        onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
-        style={{ display: 'none' }} 
+        style={{ display: 'none' }}
       />
+
+      {/* Real F1 Radio Library (OpenF1) */}
+      {clips.length > 0 && (
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <h3 style={{ fontSize: '11px', color: 'var(--accent-teal)', letterSpacing: '1px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Radio size={13} /> REAL TEAM RADIO
+            </h3>
+            {sessions.length > 1 ? (
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {sessions.map(s => (
+                  <button
+                    key={s.key}
+                    onClick={() => setActiveSession(s.key)}
+                    style={{
+                      fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.5px',
+                      padding: '3px 10px', borderRadius: '10px', cursor: 'pointer',
+                      background: s.key === currentSession ? 'rgba(26, 188, 156, 0.15)' : 'transparent',
+                      color: s.key === currentSession ? 'var(--accent-teal)' : 'var(--text-secondary)',
+                      border: `1px solid ${s.key === currentSession ? 'rgba(26, 188, 156, 0.5)' : 'var(--border-card)'}`
+                    }}
+                  >
+                    {shortLabel(s.label)}
+                  </button>
+                ))}
+              </div>
+            ) : sessionLabel ? (
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{sessionLabel}</span>
+            ) : null}
+          </div>
+          <div style={{ maxHeight: '132px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {visibleClips.map((clip) => (
+              <div
+                key={clip.id}
+                onClick={() => playClip(clip)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '6px 8px', borderRadius: '6px', cursor: 'pointer',
+                  background: activeClipId === clip.id ? 'rgba(26, 188, 156, 0.12)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${activeClipId === clip.id ? 'rgba(26, 188, 156, 0.5)' : 'var(--border-card)'}`,
+                  transition: 'all 0.15s'
+                }}
+              >
+                <Play size={12} color="var(--accent-teal)" fill={activeClipId === clip.id ? 'var(--accent-teal)' : 'none'} />
+                <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-primary)', minWidth: '34px' }}>
+                  {clip.driver}
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flex: 1 }}>
+                  {clip.lap_number ? `Lap ${clip.lap_number}` : 'Radio'}
+                  {clip.synthetic ? ' · synthetic' : ''}
+                </span>
+                {clip.lap_duration && (
+                  <span className="mono" style={{ fontSize: '10px', color: 'var(--accent-teal)' }}>
+                    {formatLapTime(clip.lap_duration)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* Visualizer Player */}
       <div style={{ background: 'var(--bg-dark)', borderRadius: '8px', padding: '12px', marginBottom: '14px', border: '1px solid var(--border-card)' }}>
@@ -407,7 +474,7 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
             </span>
           ) : (
             <span style={{ color: 'var(--text-secondary)', fontSize: '13px', fontStyle: 'italic' }}>
-              Awaiting transmission... Subtitles light up live as speech audio plays
+              {currentAnalysis?.analyzing ? 'Transcribing with Whisper…' : 'Awaiting transmission... Subtitles light up live as speech audio plays'}
             </span>
           )}
         </div>

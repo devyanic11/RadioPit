@@ -2,30 +2,31 @@ import sys
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import shutil
-import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from audio.converter import convert_audio_to_wav
 from engine.fusion import DriverStateEngine
 from data.sample_clips import SampleClipManager
+from data.race_context import RaceContextManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 engine = DriverStateEngine()
 sample_manager = SampleClipManager()
+race_context = RaceContextManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: initialize Hugging Face models & sample clips."""
     logging.info("Starting up Pitwall Backend with Hugging Face models...")
     sample_manager.generate_sample_clips()
-    logging.info(f"Loaded {len(sample_manager.clips)} sample clips")
+    logging.info(f"Radio library ready: {len(sample_manager.clips)} clips ({sample_manager.session_label})")
     yield
     logging.info("Shutting down Pitwall Backend...")
 
@@ -110,7 +111,34 @@ def get_sample_audio(clip_id: str):
         raise HTTPException(status_code=404, detail="Clip not found")
     if not os.path.exists(clip['file_path']):
         raise HTTPException(status_code=404, detail="Audio file not found")
-    return FileResponse(clip['file_path'], media_type="audio/wav")
+    media_type = "audio/mpeg" if clip['file_path'].endswith('.mp3') else "audio/wav"
+    return FileResponse(clip['file_path'], media_type=media_type)
+
+
+@app.get("/api/race-context/{driver_number}")
+def get_race_context(driver_number: int, session_key: int = None):
+    """Real session data for a driver: lap times, best lap, stints, positions (OpenF1, cached)."""
+    if session_key is None:
+        if sample_manager.sessions and sample_manager.sessions[0].get('session_key'):
+            session_key = sample_manager.sessions[0]['session_key']
+        else:
+            session_key = config.OPENF1_SESSION_KEYS[0]
+    try:
+        return race_context.get_context(session_key, driver_number)
+    except Exception as e:
+        logging.error(f"Race context error: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Race context unavailable: {e}")
+
+
+@app.post("/api/sample-clips/refresh")
+def refresh_sample_clips(session_key: int = None):
+    """Re-fetch the radio library from OpenF1 (optionally for a different session)."""
+    try:
+        sample_manager.generate_sample_clips(force_refresh=True, session_key=session_key)
+        return sample_manager.get_clips_metadata()
+    except Exception as e:
+        logging.error(f"Radio library refresh error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/analyze-sample/{clip_id}")
@@ -130,24 +158,3 @@ def analyze_sample(clip_id: str):
     except Exception as e:
         logging.error(f"Sample analysis error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.websocket("/ws/stream")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    logging.info("WebSocket client connected")
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            try:
-                import soundfile as sf
-                import io
-                audio_array, sr = sf.read(io.BytesIO(data))
-                if len(audio_array) > 8000:
-                    result = engine.analyze_utterance(audio_array)
-                    await websocket.send_json(result)
-            except Exception as e:
-                logging.error(f"WS process error: {e}")
-
-    except WebSocketDisconnect:
-        logging.info("WebSocket client disconnected")

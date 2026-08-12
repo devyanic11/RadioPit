@@ -1,52 +1,101 @@
-# 🏎️ PITWALL — F1 Driver Voice Stress & Real-Time Telemetry Platform
+# 🏎️ PITWALL — The Silent Co-Driver
 
-PITWALL is a 100% free, open-source real-time F1 driver radio telemetry dashboard powered by **KoljaB/RealtimeSTT**, **Hugging Face Transformers**, and **Classical Audio DSP**.
+**AI that hears what race engineers miss.** Pitwall analyzes real F1 team-radio audio, measures driver stress / frustration / fatigue / mental load from voice and language, correlates it with real lap times, and tells the engineer what to do about it — all running locally, powered by Hugging Face.
 
-## 🌟 Key Features
+> Hackathon theme: *Artificial Intelligence in Racing Strategy & Decision-Making — Powered by Hugging Face*
 
-- **KoljaB/RealtimeSTT Speech-to-Text**: Real-time voice transcription with sub-second word-timestamp alignment using `faster-whisper`.
-- **YouTube-Style Real-Time Subtitles**: Instant 0ms word streaming (`currentTime >= start`), showing max 8 spoken words with glowing active word highlighting.
-- **Hugging Face Multi-Model Fusion Engine**:
-  - **Acoustic Arousal/Valence**: `superb/wav2vec2-base-superb-er`
-  - **NLP Sentiment & Urgency**: `distilbert-base-uncased-finetuned-sst-2-english`
-  - **Classical DSP Prosody**: Zero-lag pitch variation, speech rate, and vocal intensity extraction.
-- **Driver State Telemetry (4 Metrics)**:
-  - 🧠 **Stress** (0–100%)
-  - 🔥 **Frustration** (0–100%)
-  - 🔋 **Fatigue** (0–100%)
-  - ⚡ **Mental Load** (0–100%)
-- **F1 Telemetry Dashboard UI**: Built with Vite + React, glassmorphic racing aesthetic, Recharts driver state time-series, alerts & radio timeline, and bottom session performance overview.
+## How it works
 
-## 🚀 Quick Start
+```
+Real F1 radio (OpenF1 API)  ──┐
+Uploaded / mic audio  ────────┤
+                              ▼
+                    ffmpeg → 16kHz WAV
+                              ▼
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+  ASR (Whisper)      Acoustic emotion         Prosody DSP
+  faster-whisper     wav2vec2 A/V/D           Praat: pitch, rate,
+  word timestamps    regression               jitter, HNR, pauses
+  + confidence            │                        │
+        │                 │                        │
+        ▼                 │                        │
+  NLP (DistilBERT)        │                        │
+  sentiment + F1          │                        │
+  keywords + urgency      │                        │
+        └────────┬────────┴────────────────────────┘
+                 ▼
+        Fusion engine  (35% acoustic · 25% prosody · 25% NLP · 15% keywords)
+                 ▼
+   Stress / Frustration / Fatigue / Mental Load  (+ per-window time series)
+                 ▼
+   Engineer recommendations · Explainable sub-scores · Real lap-time correlation
+```
 
-### 1. Backend Setup (FastAPI + RealtimeSTT)
+### Models (Hugging Face)
+
+| Role | Model | Output |
+|---|---|---|
+| Speech-to-text | `faster-whisper tiny.en` (CTranslate2 Whisper) | transcript, word timestamps, word-probability confidence |
+| Acoustic emotion (primary) | `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim` | arousal / dominance / valence regression (0–1) |
+| Acoustic emotion (fallback) | `superb/wav2vec2-base-superb-er` | 4-way emotion → A/V/D mapping |
+| Text sentiment | `distilbert-base-uncased-finetuned-sst-2-english` | positive/negative sentiment |
+
+All models download once from the Hugging Face Hub and run **locally on CPU** — no API keys, no cloud inference. A pure-DSP heuristic (librosa) is the final fallback tier so the pipeline degrades gracefully offline.
+
+### Real data (OpenF1)
+
+On first startup the backend pulls **real team-radio clips** and **real lap times, stints and positions** from the free [OpenF1 API](https://openf1.org) — by default two races: **2026 Hungary** and **2026 Silverstone** — and caches everything in `backend/static/clips/` for offline use. Each radio message is matched to the lap it was transmitted on via timestamps, so the mood-vs-lap-performance chart uses genuine data. The UI shows a race tab per session. Switch races with:
+
+```bash
+PITWALL_SESSION_KEYS="11342,11299" python -m uvicorn api.main:app --port 8000
+# (session keys from https://api.openf1.org/v1/sessions?year=2026&session_name=Race)
+# or at runtime: POST /api/sample-clips/refresh?session_key=...
+```
+
+### What makes the scores trustworthy
+
+- **Multi-signal fusion** — voice tone, prosody, and language are scored independently, then fused with fixed weights. The UI's "Why this score" panel shows every sub-score, detected keyword, and prosody stat behind each number.
+- **Real per-window dynamics** — the live-motion time series is driven by measured per-window RMS energy and Praat pitch deviation, not animation tricks.
+- **Honest confidence** — reported confidence is Whisper's mean word-level probability.
+- **Engineer actions** — a deterministic rules layer converts driver state + detected complaints into prioritized radio-handling guidance, each with its triggering signal attached.
+
+## Quick start
+
+### Backend (FastAPI)
 
 ```bash
 cd backend
-
-# Install macOS audio dependency
-brew install portaudio
-
-# Install dependencies
+brew install portaudio ffmpeg        # macOS audio deps
 pip install -r requirements.txt
-pip install "RealtimeSTT[faster-whisper]" silero-vad
-
-# Start backend server
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. Frontend Setup (Vite + React)
+First run downloads HF models (~1GB total) and the OpenF1 radio clips; later runs use local caches.
+
+### Frontend (Vite + React)
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start frontend dev server
 npm run dev -- --port 5173
 ```
 
-Access the dashboard at `http://localhost:5173`.
-# Pitwall
-# Pitwall
+Open `http://localhost:5173`. The dashboard header shows **LIVE** when the backend is connected; without it, the UI runs in a clearly-labeled DEMO simulation.
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/health` | model availability + clip count |
+| `POST /api/analyze` | analyze uploaded audio (wav/mp3/ogg/webm) |
+| `GET /api/sample-clips` | real radio clip library metadata |
+| `GET /api/sample-clips/{id}/audio` | clip audio stream |
+| `POST /api/analyze-sample/{id}` | run full pipeline on a library clip |
+| `POST /api/sample-clips/refresh` | re-fetch library (optional `session_key`) |
+| `GET /api/timeline` | analysis history |
+
+## Notes
+
+- Radio audio and lap data © Formula 1 via the public OpenF1 API — used here for a non-commercial hackathon demo.
+- The audeering emotion model is CC-BY-NC-SA-4.0 (non-commercial).
