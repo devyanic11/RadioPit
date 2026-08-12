@@ -20,7 +20,7 @@ from data.openf1_client import OpenF1Client
 
 MIN_CLIP_BYTES = 8_000  # skip near-empty recordings
 MIN_CLIP_SEC = 2.5      # skip "copy, understood" clutter
-CACHE_VERSION = 2       # bump to invalidate old caches (e.g. pre-clutter-filter)
+CACHE_VERSION = 3       # bump to invalidate old caches (v3: multi-session)
 
 
 def _probe_duration(filepath) -> float:
@@ -43,8 +43,8 @@ class SampleClipManager:
         self.clips_dir = config.AUDIO_DIR
         self.metadata_file = os.path.join(self.clips_dir, 'metadata.json')
         self.clips = []
+        self.sessions = []       # [{'session_key', 'label'}]
         self.session_label = None
-        self.session_key = None
 
     # ------------------------------------------------------------------
     # Entry point (called from FastAPI lifespan)
@@ -56,11 +56,24 @@ class SampleClipManager:
             logging.info(f"Loaded {len(self.clips)} cached real radio clips ({self.session_label})")
             return
 
-        try:
-            self._fetch_from_openf1(session_key or config.OPENF1_SESSION_KEY)
-            logging.info(f"Fetched {len(self.clips)} real radio clips from OpenF1 ({self.session_label})")
-        except Exception as e:
-            logging.warning(f"OpenF1 fetch failed ({e}); falling back to synthetic clips")
+        session_keys = [session_key] if session_key else config.OPENF1_SESSION_KEYS
+        all_clips, sessions_meta = [], []
+        for sk in session_keys:
+            try:
+                clips, label = self._fetch_session_clips(sk)
+                all_clips.extend(clips)
+                sessions_meta.append({'session_key': sk, 'label': label})
+                logging.info(f"Fetched {len(clips)} real radio clips from OpenF1 ({label})")
+            except Exception as e:
+                logging.warning(f"OpenF1 fetch failed for session {sk}: {e}")
+
+        if all_clips:
+            self.clips = all_clips
+            self.sessions = sessions_meta
+            self.session_label = " · ".join(s['label'] for s in sessions_meta)
+            self._save_cache('openf1')
+        else:
+            logging.warning("No OpenF1 clips available; falling back to synthetic clips")
             self._generate_synthetic_fallback()
 
     # ------------------------------------------------------------------
@@ -80,8 +93,8 @@ class SampleClipManager:
             if not all(os.path.exists(c.get('file_path', '')) for c in clips):
                 return False
             self.clips = clips
+            self.sessions = data.get('sessions', [])
             self.session_label = data.get('session_label')
-            self.session_key = data.get('session_key')
             return True
         except Exception:
             return False
@@ -92,14 +105,16 @@ class SampleClipManager:
                 'source': source,
                 'cache_version': CACHE_VERSION,
                 'session_label': self.session_label,
-                'session_key': self.session_key,
+                'sessions': self.sessions,
                 'clips': self.clips
             }, f, indent=2)
 
     # ------------------------------------------------------------------
     # Real data: OpenF1
     # ------------------------------------------------------------------
-    def _fetch_from_openf1(self, session_key):
+    def _fetch_session_clips(self, session_key):
+        """Fetch and download real radio clips for one race session.
+        Returns (clips, session_label)."""
         client = OpenF1Client()
 
         session = client.get_session_info(session_key)
@@ -108,12 +123,11 @@ class SampleClipManager:
         if not radio:
             raise RuntimeError(f"No team radio found for session {session_key}")
 
-        self.session_label = " ".join(str(x) for x in [
+        session_label = " ".join(str(x) for x in [
             session.get('year', ''),
             session.get('country_name', ''),
             session.get('session_name', '')
         ] if x).strip() or f"Session {session_key}"
-        self.session_key = session_key
 
         laps_by_driver = {}
         clips = []
@@ -140,7 +154,7 @@ class SampleClipManager:
             if not lap.get('lap_number'):
                 continue  # pre-race / formation chatter — skip
 
-            clip_id = f"clip_{len(clips) + 1}"
+            clip_id = f"clip_{session_key}_{len(clips) + 1}"
             filename = f"{clip_id}.mp3"
             filepath = os.path.join(self.clips_dir, filename)
 
@@ -163,7 +177,9 @@ class SampleClipManager:
             clips.append({
                 'id': clip_id,
                 'name': f"{acronym} — Lap {lap_number}" if lap_number else f"{acronym} radio",
-                'description': f"Real team radio · {self.session_label}",
+                'description': f"Real team radio · {session_label}",
+                'session_key': session_key,
+                'session_label': session_label,
                 'driver': acronym,
                 'driver_full_name': drv.get('full_name'),
                 'team': drv.get('team_name'),
@@ -182,14 +198,14 @@ class SampleClipManager:
         if not clips:
             raise RuntimeError("No radio clips could be downloaded")
 
-        self.clips = clips
-        self._save_cache('openf1')
+        return clips, session_label
 
     # ------------------------------------------------------------------
     # Offline fallback: synthetic audio (clearly labeled)
     # ------------------------------------------------------------------
     def _generate_synthetic_fallback(self):
         self.session_label = "Offline demo (synthetic audio)"
+        self.sessions = [{'session_key': None, 'label': self.session_label}]
         clip_defs = [
             ('Calm Update', 'LOW', 'Box this lap, tyres are fine, pace is good', 'low', 12),
             ('Moderate Concern', 'MODERATE', 'Rear tyres starting to go off, losing grip through Turn 4', 'moderate', 18),
@@ -207,6 +223,8 @@ class SampleClipManager:
                 'id': clip_id,
                 'name': f"{name} (synthetic)",
                 'description': 'Synthetic fallback clip — OpenF1 unreachable',
+                'session_key': None,
+                'session_label': self.session_label,
                 'driver': 'DEMO',
                 'team': None,
                 'lap_number': lap_number,
@@ -255,6 +273,7 @@ class SampleClipManager:
     def get_clips_metadata(self):
         return {
             'session_label': self.session_label,
+            'sessions': self.sessions,
             'clips': [{k: v for k, v in c.items() if k != 'file_path'} for c in self.clips]
         }
 

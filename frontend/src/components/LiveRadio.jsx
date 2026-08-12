@@ -8,6 +8,20 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
   const [isRecording, setIsRecording] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [activeClipId, setActiveClipId] = useState(null);
+  const [activeSession, setActiveSession] = useState(null);
+
+  // Distinct race sessions present in the clip library
+  const sessions = [];
+  clips.forEach(c => {
+    if (!sessions.find(s => s.key === c.session_key)) {
+      sessions.push({ key: c.session_key, label: c.session_label || 'Session' });
+    }
+  });
+  const currentSession = activeSession != null && sessions.find(s => s.key === activeSession)
+    ? activeSession
+    : (sessions[0]?.key ?? null);
+  const visibleClips = sessions.length > 1 ? clips.filter(c => c.session_key === currentSession) : clips;
+  const shortLabel = (label) => (label || '').replace(/^\d{4}\s*/, '').replace(/\s*Race$/i, '') || 'Session';
   
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
@@ -320,12 +334,30 @@ const LiveRadio = ({ onAudioUpload, isLive, currentAnalysis, onPlaybackProgress,
             <h3 style={{ fontSize: '11px', color: 'var(--accent-teal)', letterSpacing: '1px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Radio size={13} /> REAL TEAM RADIO
             </h3>
-            {sessionLabel && (
+            {sessions.length > 1 ? (
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {sessions.map(s => (
+                  <button
+                    key={s.key}
+                    onClick={() => setActiveSession(s.key)}
+                    style={{
+                      fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.5px',
+                      padding: '3px 10px', borderRadius: '10px', cursor: 'pointer',
+                      background: s.key === currentSession ? 'rgba(26, 188, 156, 0.15)' : 'transparent',
+                      color: s.key === currentSession ? 'var(--accent-teal)' : 'var(--text-secondary)',
+                      border: `1px solid ${s.key === currentSession ? 'rgba(26, 188, 156, 0.5)' : 'var(--border-card)'}`
+                    }}
+                  >
+                    {shortLabel(s.label)}
+                  </button>
+                ))}
+              </div>
+            ) : sessionLabel ? (
               <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{sessionLabel}</span>
-            )}
+            ) : null}
           </div>
           <div style={{ maxHeight: '132px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {clips.map((clip) => (
+            {visibleClips.map((clip) => (
               <div
                 key={clip.id}
                 onClick={() => playClip(clip)}

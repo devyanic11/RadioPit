@@ -29,7 +29,8 @@ const App = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [raceContext, setRaceContext] = useState(null);
   const [selectedClip, setSelectedClip] = useState(null);
-  const [stressByLap, setStressByLap] = useState({});
+  // Stress pins keyed by `${session_key}_${driver_number}` so each race/driver keeps its own chart
+  const [stressMap, setStressMap] = useState({});
   const [stressHistory, setStressHistory] = useState([]);
 
   // ---- Backend health ----
@@ -59,7 +60,7 @@ const App = () => {
           setSampleClips(clips);
           setSessionLabel(data.session_label || null);
           if (clips.length > 0 && clips[0].driver_number != null) {
-            loadRaceContext(clips[0].driver_number);
+            loadRaceContext(clips[0].driver_number, clips[0].session_key);
           }
         }
       } catch (err) {
@@ -69,9 +70,10 @@ const App = () => {
     loadClips();
   }, [isLive]);
 
-  const loadRaceContext = async (driverNumber) => {
+  const loadRaceContext = async (driverNumber, sessionKey = null) => {
     try {
-      const res = await fetch(`${API_BASE}/api/race-context/${driverNumber}`);
+      const qs = sessionKey != null ? `?session_key=${sessionKey}` : '';
+      const res = await fetch(`${API_BASE}/api/race-context/${driverNumber}${qs}`);
       if (res.ok) setRaceContext(await res.json());
     } catch (err) {
       console.warn('Could not load race context:', err.message);
@@ -111,9 +113,10 @@ const App = () => {
       segments: result.segments || []
     });
 
-    // Pin stress onto the real lap chart
-    if (lap != null) {
-      setStressByLap(prev => ({ ...prev, [lap]: sVal }));
+    // Pin stress onto the real lap chart (per race + driver)
+    if (lap != null && clip?.session_key != null && clip?.driver_number != null) {
+      const key = `${clip.session_key}_${clip.driver_number}`;
+      setStressMap(prev => ({ ...prev, [key]: { ...(prev[key] || {}), [lap]: sVal } }));
     }
 
     const nlpKeywords = result.signals?.nlp?.f1_keywords || [];
@@ -176,8 +179,10 @@ const App = () => {
   const handleClipSelect = useCallback(async (clip) => {
     setSelectedClip(clip);
     setCurrentAnalysis({ transcript: '', word_timestamps: [], confidence: null, analyzing: true });
-    if (clip.driver_number != null && clip.driver_number !== raceContext?.driver?.number) {
-      loadRaceContext(clip.driver_number);
+    const driverChanged = clip.driver_number != null && clip.driver_number !== raceContext?.driver?.number;
+    const sessionChanged = clip.session_key != null && clip.session_key !== raceContext?.session?.session_key;
+    if (driverChanged || sessionChanged) {
+      loadRaceContext(clip.driver_number, clip.session_key);
     }
     try {
       const response = await fetch(`${API_BASE}/api/analyze-sample/${clip.id}`, { method: 'POST' });
@@ -219,14 +224,16 @@ const App = () => {
   // ---- Real derived values for header / footer / chart ----
   const chartData = useMemo(() => {
     if (!raceContext?.laps) return [];
+    const ctxKey = `${raceContext.session?.session_key}_${raceContext.driver?.number}`;
+    const pins = stressMap[ctxKey] || {};
     return raceContext.laps
       .filter(l => l.lap != null)
       .map(l => ({
         lap: l.lap,
         lapTime: l.pit_out ? null : l.time,
-        stress: stressByLap[l.lap] ?? null
+        stress: pins[l.lap] ?? null
       }));
-  }, [raceContext, stressByLap]);
+  }, [raceContext, stressMap]);
 
   const clipPosition = useMemo(() => {
     if (!selectedClip?.date || !raceContext?.positions?.length) return null;

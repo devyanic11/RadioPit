@@ -40,7 +40,9 @@ SAMPLE_RATE = 16000
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), 'static', 'clips')
 
 # OpenF1 real team-radio source (https://openf1.org)
-# 11342 = 2026 Hungarian Grand Prix, Race. Override via env for other sessions.
-OPENF1_SESSION_KEY = os.environ.get('PITWALL_SESSION_KEY', 11342)
-OPENF1_MAX_CLIPS = 8
-OPENF1_MAX_PER_DRIVER = 3
+# Race sessions to load: 11342 = 2026 Hungary, 11326 = 2026 Silverstone.
+# Override via env: PITWALL_SESSION_KEYS="11342,11299" (comma-separated)
+_session_env = os.environ.get('PITWALL_SESSION_KEYS', '11342,11326')
+OPENF1_SESSION_KEYS = [int(s) for s in _session_env.split(',') if s.strip()]
+OPENF1_MAX_CLIPS = 8          # per session
+OPENF1_MAX_PER_DRIVER = 3     # per session

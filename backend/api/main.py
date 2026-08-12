@@ -116,9 +116,13 @@ def get_sample_audio(clip_id: str):
 
 
 @app.get("/api/race-context/{driver_number}")
-def get_race_context(driver_number: int):
+def get_race_context(driver_number: int, session_key: int = None):
     """Real session data for a driver: lap times, best lap, stints, positions (OpenF1, cached)."""
-    session_key = sample_manager.session_key or config.OPENF1_SESSION_KEY
+    if session_key is None:
+        if sample_manager.sessions and sample_manager.sessions[0].get('session_key'):
+            session_key = sample_manager.sessions[0]['session_key']
+        else:
+            session_key = config.OPENF1_SESSION_KEYS[0]
     try:
         return race_context.get_context(session_key, driver_number)
     except Exception as e:

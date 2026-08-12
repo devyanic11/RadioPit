@@ -67,6 +67,7 @@ class RaceContextManager:
 
         context = {
             'session': {
+                'session_key': session_key,
                 'label': " ".join(str(x) for x in [
                     session.get('year', ''), session.get('country_name', ''), session.get('session_name', '')
                 ] if x).strip(),

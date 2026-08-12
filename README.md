@@ -45,10 +45,11 @@ All models download once from the Hugging Face Hub and run **locally on CPU** �
 
 ### Real data (OpenF1)
 
-On first startup the backend pulls **real team-radio clips** and **real lap times** from the free [OpenF1 API](https://openf1.org) (default session: 2026 Hungarian GP Race) and caches them in `backend/static/clips/` for offline use. Each radio message is matched to the lap it was transmitted on via timestamps, so the stress-vs-lap-time chart uses genuine data. Switch sessions with:
+On first startup the backend pulls **real team-radio clips** and **real lap times, stints and positions** from the free [OpenF1 API](https://openf1.org) — by default two races: **2026 Hungary** and **2026 Silverstone** — and caches everything in `backend/static/clips/` for offline use. Each radio message is matched to the lap it was transmitted on via timestamps, so the mood-vs-lap-performance chart uses genuine data. The UI shows a race tab per session. Switch races with:
 
 ```bash
-PITWALL_SESSION_KEY=<openf1_session_key> python -m uvicorn api.main:app --port 8000
+PITWALL_SESSION_KEYS="11342,11299" python -m uvicorn api.main:app --port 8000
+# (session keys from https://api.openf1.org/v1/sessions?year=2026&session_name=Race)
 # or at runtime: POST /api/sample-clips/refresh?session_key=...
 ```
 
