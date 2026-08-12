@@ -19,14 +19,15 @@ class ASREngine:
             logging.error(f"Failed to initialize RealtimeSTT faster-whisper engine: {e}", exc_info=True)
 
     def transcribe(self, audio_path_or_array, sample_rate=16000):
-        """Transcribe audio with word-level timestamps using RealtimeSTT faster-whisper backend."""
+        """Transcribe audio with word-level timestamps using Realtime faster-whisper backend."""
         if not self.available or self.model is None:
             return {
                 'text': '',
                 'word_timestamps': [],
                 'segments': [],
                 'language': 'en',
-                'duration': 0.0
+                'duration': 0.0,
+                'confidence': 0.0
             }
 
         try:
@@ -52,6 +53,7 @@ class ASREngine:
             full_text = " ".join(full_text_parts).strip()
 
             word_timestamps = []
+            word_probs = []
             for seg in segments:
                 if hasattr(seg, 'words') and seg.words:
                     for w in seg.words:
@@ -62,6 +64,14 @@ class ASREngine:
                                 'start': round(float(w.start), 2),
                                 'end': round(float(w.end), 2)
                             })
+                            if getattr(w, 'probability', None) is not None:
+                                word_probs.append(float(w.probability))
+
+            # Real ASR confidence: mean word-level probability from faster-whisper
+            if word_probs:
+                confidence = float(np.mean(word_probs))
+            else:
+                confidence = 0.5 if full_text else 0.0
 
             # If segment text exists but word_timestamps was empty, generate step timestamps
             if full_text and not word_timestamps:
@@ -79,7 +89,8 @@ class ASREngine:
                 'word_timestamps': word_timestamps,
                 'segments': [{'start': w['start'], 'end': w['end'], 'text': w['word']} for w in word_timestamps],
                 'language': getattr(info, 'language', 'en'),
-                'duration': duration_sec
+                'duration': duration_sec,
+                'confidence': confidence
             }
         except Exception as e:
             logging.error(f"RealtimeSTT faster-whisper transcription error: {e}")
@@ -88,5 +99,6 @@ class ASREngine:
                 'word_timestamps': [],
                 'segments': [],
                 'language': 'en',
-                'duration': 0.0
+                'duration': 0.0,
+                'confidence': 0.0
             }

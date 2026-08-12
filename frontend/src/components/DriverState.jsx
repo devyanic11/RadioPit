@@ -32,21 +32,31 @@ const ProgressBar = ({ label, icon: Icon, value, color, level }) => {
   );
 };
 
-const DriverState = ({ state }) => {
+const DriverState = ({ state, stressTrend = null }) => {
+  // stressTrend: real % change vs mean of previous radio calls (null until 2+ analyses)
+  const trendUp = stressTrend != null && stressTrend > 0;
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
         <h2 style={{ fontSize: '16px', fontWeight: '600', letterSpacing: '1px' }}>DRIVER STATE</h2>
-        <span style={{ fontSize: '12px', color: 'var(--accent-red)' }}>Trending ↗</span>
+        {stressTrend != null && (
+          <span style={{ fontSize: '12px', color: trendUp ? 'var(--accent-red)' : 'var(--accent-teal)' }}>
+            Trending {trendUp ? '↗' : '↘'}
+          </span>
+        )}
       </div>
-      
+
       <ProgressBar label="Stress" icon={Zap} value={state.stress.value} level={state.stress.level} color="var(--accent-red)" />
       <ProgressBar label="Frustration" icon={Flame} value={state.frustration.value} level={state.frustration.level} color="var(--accent-orange)" />
       <ProgressBar label="Fatigue" icon={BatteryWarning} value={state.fatigue.value} level={state.fatigue.level} color="var(--accent-yellow)" />
       <ProgressBar label="Mental Load" icon={Cpu} value={state.mentalLoad.value} level={state.mentalLoad.level} color="var(--accent-teal)" />
-      
+
       <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--border-card)', fontSize: '12px', color: 'var(--text-secondary)' }}>
-        Compared to last 3 radio calls: <span style={{ color: 'var(--accent-red)' }}>↑38%</span>
+        {stressTrend != null ? (
+          <>Stress vs previous radio calls: <span style={{ color: trendUp ? 'var(--accent-red)' : 'var(--accent-teal)' }}>{trendUp ? '↑' : '↓'}{Math.abs(Math.round(stressTrend))}%</span></>
+        ) : (
+          <>Analyze more radio calls to see the trend</>
+        )}
       </div>
     </div>
   );

@@ -15,10 +15,15 @@ const RadioTimeline = ({ entries }) => {
     <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ fontSize: '16px', fontWeight: '600', letterSpacing: '1px' }}>RADIO TIMELINE</h2>
-        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer' }}>View All</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entries.length} analyzed</span>
       </div>
-      
+
       <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px' }}>
+        {entries.length === 0 && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '13px', fontStyle: 'italic', padding: '16px 0' }}>
+            No radio calls analyzed yet — play a clip from the Real Team Radio library.
+          </div>
+        )}
         <div style={{ position: 'relative', paddingLeft: '20px' }}>
           <div style={{ position: 'absolute', left: '7px', top: '10px', bottom: '0', width: '2px', background: 'var(--border-card)' }}></div>
           
@@ -49,7 +54,7 @@ const RadioTimeline = ({ entries }) => {
                     <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }}>
                       <Play size={12} fill="currentColor" />
                     </div>
-                    <span className="mono" style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>LAP {entry.lap}</span>
+                    <span className="mono" style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>{entry.lap != null ? `LAP ${entry.lap}` : 'UPLOAD'}</span>
                     <span className="mono" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.timestamp}</span>
                   </div>
                   <span style={{ 

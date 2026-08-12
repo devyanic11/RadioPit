@@ -37,5 +37,10 @@ F1_CORNERS = [
 ]
 
 SAMPLE_RATE = 16000
-VAD_THRESHOLD = 0.5
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), 'static', 'clips')
+
+# OpenF1 real team-radio source (https://openf1.org)
+# 11342 = 2026 Hungarian Grand Prix, Race. Override via env for other sessions.
+OPENF1_SESSION_KEY = os.environ.get('PITWALL_SESSION_KEY', 11342)
+OPENF1_MAX_CLIPS = 8
+OPENF1_MAX_PER_DRIVER = 3
