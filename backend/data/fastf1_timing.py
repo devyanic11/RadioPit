@@ -40,9 +40,9 @@ class FastF1Timing:
 
     def get_timing(self, race_id, racing_number):
         """Returns {'driver': {...}, 'laps': [...], 'best_lap': {...}, 'total_laps': n}."""
-        # v2: laps carry start_epoch (pandas isoformat can have ns precision that
-        # datetime.fromisoformat cannot parse — epoch floats are unambiguous)
-        cache_file = os.path.join(self.cache_dir, f"{race_id}_{racing_number}_v2.json")
+        # v3: laps carry start_epoch; telemetry is loaded when needed because
+        # FastF1 only computes LapStartDate (via t0_date) from telemetry data.
+        cache_file = os.path.join(self.cache_dir, f"{race_id}_{racing_number}_v3.json")
         if os.path.exists(cache_file):
             try:
                 with open(cache_file) as f:
@@ -59,6 +59,18 @@ class FastF1Timing:
 
         dn = str(racing_number)
         laps_df = session.laps.pick_drivers(dn)
+
+        # FastF1 derives LapStartDate from telemetry (t0_date). Without it,
+        # radio messages can't be matched to laps — load telemetry if needed.
+        try:
+            needs_telemetry = laps_df['LapStartDate'].isna().all()
+        except Exception:
+            needs_telemetry = True
+        if needs_telemetry:
+            logging.info(f"{race_id}: LapStartDate missing — loading telemetry "
+                         "(first time per race takes a few minutes, then cached)...")
+            session.load(laps=True, telemetry=True, weather=False, messages=False)
+            laps_df = session.laps.pick_drivers(dn)
         try:
             drv = session.get_driver(dn)
             driver_info = {
