@@ -31,12 +31,12 @@ HF dataset (metadata index, one-time)          FastF1 (official timing)
 
 ## Models
 
-| Role | Model | Where it runs |
-|---|---|---|
-| Speech → text | `faster-whisper tiny.en` (local) / `openai/whisper-large-v3-turbo` (Modal GPU) | local CPU or Modal |
-| Speech → emotion | `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim` | local CPU or Modal |
-| Text sentiment | `distilbert-base-uncased-finetuned-sst-2-english` | local CPU |
-| Prosody | Praat (parselmouth) — pitch, rate, jitter, HNR | local, no model |
+| Role             | Model                                                                          | Where it runs      |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------ |
+| Speech → text    | `faster-whisper tiny.en` (local) / `openai/whisper-large-v3-turbo` (Modal GPU) | local CPU or Modal |
+| Speech → emotion | `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`                        | local CPU or Modal |
+| Text sentiment   | `distilbert-base-uncased-finetuned-sst-2-english`                              | local CPU          |
+| Prosody          | Praat (parselmouth) — pitch, rate, jitter, HNR                                 | local, no model    |
 
 See `MODELS.md` / the models doc for benchmarks and demo talking points.
 
@@ -78,14 +78,14 @@ Whisper large-v3-turbo + the emotion model then run on a Modal T4; the backend a
 
 ## API
 
-| Endpoint | Description |
-|---|---|
-| `GET /api/health` | model + dataset-index status |
-| `GET /api/races` | all Grands Prix in the dataset |
-| `GET /api/races/{race_id}/drivers` | drivers with radio in that race |
-| `GET /api/story/{race_id}/{racing_number}` | clips + official laps, timestamp-matched |
-| `POST /api/story/clips/{clip_id}/analyze` | full pipeline on one clip (incl. ground-truth comparison) |
-| `POST /api/analyze` | analyze your own uploaded/recorded audio |
+| Endpoint                                   | Description                                               |
+| ------------------------------------------ | --------------------------------------------------------- |
+| `GET /api/health`                          | model + dataset-index status                              |
+| `GET /api/races`                           | all Grands Prix in the dataset                            |
+| `GET /api/races/{race_id}/drivers`         | drivers with radio in that race                           |
+| `GET /api/story/{race_id}/{racing_number}` | clips + official laps, timestamp-matched                  |
+| `POST /api/story/clips/{clip_id}/analyze`  | full pipeline on one clip (incl. ground-truth comparison) |
+| `POST /api/analyze`                        | analyze your own uploaded/recorded audio                  |
 
 ## Notes
 
