@@ -276,8 +276,8 @@ const App = () => {
           {storyLoading ? (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--text-secondary)', fontSize: '13px' }}>
               <Loader2 size={22} className="spin" color="var(--accent-red)" />
-              Downloading radio clips (Hugging Face) + official timing (FastF1)…
-              <span style={{ fontSize: '11px', fontStyle: 'italic' }}>first load of a race takes ~30-60s, then it's cached</span>
+              Downloading radio clips (Hugging Face) + official timing & telemetry (FastF1)…
+              <span style={{ fontSize: '11px', fontStyle: 'italic' }}>first load of a race can take a few minutes, then it's cached forever</span>
             </div>
           ) : storyError ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-red)', fontSize: '13px', textAlign: 'center', padding: '20px' }}>
