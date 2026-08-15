@@ -1,348 +1,328 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Radio, WifiOff } from 'lucide-react';
-import LiveRadio from './components/LiveRadio';
-import DriverState from './components/DriverState';
-import AlertsInsights from './components/AlertsInsights';
-import StateChart from './components/StateChart';
-import RadioTimeline from './components/RadioTimeline';
-import PerformanceBar from './components/PerformanceBar';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Play, Loader2, WifiOff, Flag } from 'lucide-react';
+import StoryChart from './components/StoryChart';
+import AnalysisPanel from './components/AnalysisPanel';
+import ClipList from './components/ClipList';
+import UploadZone from './components/UploadZone';
 
 const API_BASE = 'http://localhost:8000';
+const DEFAULT_RACE = '2021_Abu_Dhabi_Grand_Prix';
 
-const EMPTY_STATE = {
-  stress: { value: 0, level: 'LOW' },
-  frustration: { value: 0, level: 'LOW' },
-  fatigue: { value: 0, level: 'LOW' },
-  mentalLoad: { value: 0, level: 'LOW' }
+const fmtLap = (secs) => {
+  if (secs == null) return '—';
+  const m = Math.floor(secs / 60);
+  return `${m}:${(secs % 60).toFixed(3).padStart(6, '0')}`;
 };
 
 const App = () => {
   const [isLive, setIsLive] = useState(false);
-  const [driverState, setDriverState] = useState(EMPTY_STATE);
-  const [radioEntries, setRadioEntries] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [currentAnalysis, setCurrentAnalysis] = useState(null);
-  const [timeSeries, setTimeSeries] = useState([]);
-  const [sampleClips, setSampleClips] = useState([]);
-  const [sessionLabel, setSessionLabel] = useState(null);
-  const [lastSignals, setLastSignals] = useState(null);
-  const [recommendations, setRecommendations] = useState([]);
-  const [raceContext, setRaceContext] = useState(null);
-  const [selectedClip, setSelectedClip] = useState(null);
-  // Stress pins keyed by `${session_key}_${driver_number}` so each race/driver keeps its own chart
-  const [stressMap, setStressMap] = useState({});
-  const [stressHistory, setStressHistory] = useState([]);
+  const [indexStatus, setIndexStatus] = useState(null);   // {ready, progress}
+  const [races, setRaces] = useState([]);
+  const [raceId, setRaceId] = useState(null);
+  const [drivers, setDrivers] = useState([]);
+  const [driverNumber, setDriverNumber] = useState(null);
+  const [story, setStory] = useState(null);
+  const [storyLoading, setStoryLoading] = useState(false);
+  const [storyError, setStoryError] = useState(null);
+  const [analyses, setAnalyses] = useState({});           // clip_id -> result
+  const [analyzingId, setAnalyzingId] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [runProgress, setRunProgress] = useState(null);   // {done, total}
+  const [selectedClipId, setSelectedClipId] = useState(null);
+  const stopRunRef = useRef(false);
 
-  // ---- Backend health ----
+  // ---- Backend health + dataset index status ----
   useEffect(() => {
-    const checkBackend = async () => {
+    const check = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/health`);
-        setIsLive(res.ok);
-      } catch {
-        setIsLive(false);
-      }
+        if (res.ok) {
+          const h = await res.json();
+          setIsLive(true);
+          setIndexStatus(h.dataset_index);
+        } else setIsLive(false);
+      } catch { setIsLive(false); }
     };
-    checkBackend();
-    const interval = setInterval(checkBackend, 15000);
-    return () => clearInterval(interval);
+    check();
+    const iv = setInterval(check, 5000);
+    return () => clearInterval(iv);
   }, []);
 
-  // ---- Real radio clip library ----
+  // ---- Races (once index is ready) ----
   useEffect(() => {
-    if (!isLive) return;
-    const loadClips = async () => {
+    if (!isLive || !indexStatus?.ready || races.length > 0) return;
+    (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/sample-clips`);
+        const res = await fetch(`${API_BASE}/api/races`);
         if (res.ok) {
           const data = await res.json();
-          const clips = data.clips || [];
-          setSampleClips(clips);
-          setSessionLabel(data.session_label || null);
-          if (clips.length > 0 && clips[0].driver_number != null) {
-            loadRaceContext(clips[0].driver_number, clips[0].session_key);
-          }
+          setRaces(data);
+          const def = data.find(r => r.race_id === DEFAULT_RACE) || data[0];
+          if (def) setRaceId(def.race_id);
         }
-      } catch (err) {
-        console.warn('Could not load radio library:', err.message);
+      } catch (e) { console.warn(e); }
+    })();
+  }, [isLive, indexStatus, races.length]);
+
+  // ---- Drivers for the chosen race ----
+  useEffect(() => {
+    if (!raceId) return;
+    setDrivers([]);
+    setDriverNumber(null);
+    setStory(null);
+    setSelectedClipId(null);
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/races/${raceId}/drivers`);
+        if (res.ok) {
+          const data = await res.json();
+          setDrivers(data);
+          if (data[0]) setDriverNumber(data[0].racing_number);
+        }
+      } catch (e) { console.warn(e); }
+    })();
+  }, [raceId]);
+
+  // ---- Load the story (clips + FastF1 timing) ----
+  useEffect(() => {
+    if (!raceId || !driverNumber) return;
+    setStory(null);
+    setSelectedClipId(null);
+    setStoryError(null);
+    setStoryLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/story/${raceId}/${driverNumber}`);
+        if (res.ok) {
+          setStory(await res.json());
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setStoryError(typeof err.detail === 'string' ? err.detail : 'Story failed to load');
+        }
+      } catch (e) {
+        setStoryError(e.message);
+      } finally {
+        setStoryLoading(false);
       }
-    };
-    loadClips();
-  }, [isLive]);
+    })();
+  }, [raceId, driverNumber]);
 
-  const loadRaceContext = async (driverNumber, sessionKey = null) => {
+  const analyzeClip = useCallback(async (clipId) => {
+    setAnalyzingId(clipId);
     try {
-      const qs = sessionKey != null ? `?session_key=${sessionKey}` : '';
-      const res = await fetch(`${API_BASE}/api/race-context/${driverNumber}${qs}`);
-      if (res.ok) setRaceContext(await res.json());
-    } catch (err) {
-      console.warn('Could not load race context:', err.message);
-    }
-  };
-
-  const getLevel = (v, type) => {
-    if (type === 'stress') return v >= 75 ? 'CRITICAL' : v >= 55 ? 'HIGH' : v >= 30 ? 'MODERATE' : 'LOW';
-    if (type === 'frustration') return v >= 75 ? 'HIGH' : v >= 55 ? 'ELEVATED' : v >= 30 ? 'MODERATE' : 'LOW';
-    return v >= 55 ? 'HIGH' : v >= 30 ? 'MODERATE' : 'LOW';
-  };
-
-  // ---- Apply a backend analysis result to the dashboard ----
-  const applyAnalysisResult = useCallback((result, { lap = null, clip = null } = {}) => {
-    setTimeSeries(result.time_series || []);
-    setLastSignals(result.signals || null);
-    setRecommendations(result.recommendations || []);
-
-    const ds = result.driver_state || {};
-    const sVal = Math.round(ds.stress?.score ?? result.stress_score ?? 0);
-    const frVal = Math.round(ds.frustration?.score ?? result.frustration_score ?? 0);
-    const faVal = Math.round(ds.fatigue?.score ?? result.fatigue_score ?? 0);
-    const mlVal = Math.round(ds.mental_load?.score ?? result.mental_load_score ?? 0);
-
-    setDriverState({
-      stress: { value: sVal, level: getLevel(sVal, 'stress') },
-      frustration: { value: frVal, level: getLevel(frVal, 'frustration') },
-      fatigue: { value: faVal, level: getLevel(faVal, 'fatigue') },
-      mentalLoad: { value: mlVal, level: getLevel(mlVal, 'mentalLoad') }
-    });
-    setStressHistory(prev => [...prev, sVal].slice(-10));
-
-    setCurrentAnalysis({
-      transcript: result.transcript || 'Audio analyzed',
-      word_timestamps: result.word_timestamps || [],
-      confidence: Math.round((result.confidence ?? 0.5) * 100),
-      segments: result.segments || []
-    });
-
-    // Pin stress onto the real lap chart (per race + driver)
-    if (lap != null && clip?.session_key != null && clip?.driver_number != null) {
-      const key = `${clip.session_key}_${clip.driver_number}`;
-      setStressMap(prev => ({ ...prev, [key]: { ...(prev[key] || {}), [lap]: sVal } }));
-    }
-
-    const nlpKeywords = result.signals?.nlp?.f1_keywords || [];
-    const tags = nlpKeywords.map(k => k.word || k);
-    if (clip?.driver) tags.unshift(clip.driver);
-    if (sVal > 55) tags.push('High Stress');
-
-    setRadioEntries(prev => [{
-      id: Date.now(),
-      lap,
-      timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      transcript: result.transcript || 'Transmission analyzed',
-      severity: sVal >= 75 ? 'HIGH' : sVal >= 55 ? 'ELEVATED' : sVal >= 30 ? 'MODERATE' : 'CALM',
-      tags: tags.length > 0 ? tags : ['Radio Call']
-    }, ...prev].slice(0, 20));
-
-    if (sVal > 55) {
-      setAlerts(prev => [{
-        id: Date.now(),
-        type: sVal >= 75 ? 'warning' : 'info',
-        title: sVal >= 75 ? 'ELEVATED STRESS DETECTED' : 'Driver Stress Rising',
-        subtitle: lap != null ? `Stress reaches ${sVal}% on Lap ${lap}` : `Stress reaches ${sVal}% (uploaded audio)`
-      }, ...prev].slice(0, 10));
-    }
+      const res = await fetch(`${API_BASE}/api/story/clips/${clipId}/analyze`, { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        setAnalyses(prev => ({ ...prev, [clipId]: result }));
+        return result;
+      }
+    } catch (e) { console.warn(e); }
+    finally { setAnalyzingId(null); }
+    return null;
   }, []);
 
-  // Real trend: current stress vs mean of the previous (up to 3) radio calls
-  const stressTrend = useMemo(() => {
-    if (stressHistory.length < 2) return null;
-    const current = stressHistory[stressHistory.length - 1];
-    const prev = stressHistory.slice(-4, -1);
-    const prevMean = prev.reduce((a, b) => a + b, 0) / prev.length;
-    if (prevMean === 0) return null;
-    return ((current - prevMean) / prevMean) * 100;
-  }, [stressHistory]);
+  // ---- RUN: analyze every clip sequentially ----
+  const runAll = useCallback(async () => {
+    if (!story?.clips?.length || running) return;
+    setRunning(true);
+    stopRunRef.current = false;
+    const todo = story.clips.filter(c => !analyses[c.clip_id]);
+    setRunProgress({ done: 0, total: todo.length });
+    let done = 0;
+    for (const clip of todo) {
+      if (stopRunRef.current) break;
+      setSelectedClipId(clip.clip_id);
+      await analyzeClip(clip.clip_id);
+      done += 1;
+      setRunProgress({ done, total: todo.length });
+    }
+    setRunning(false);
+    setRunProgress(null);
+  }, [story, analyses, running, analyzeClip]);
 
-  const handleAudioUpload = useCallback(async (file) => {
-    setCurrentAnalysis({ transcript: '', word_timestamps: [], confidence: null, analyzing: true });
-    const formData = new FormData();
-    formData.append('file', file);
+  const handleClipSelect = useCallback((clip) => {
+    setSelectedClipId(clip.clip_id);
+    if (!analyses[clip.clip_id] && !running && analyzingId == null) {
+      analyzeClip(clip.clip_id);
+    }
+  }, [analyses, running, analyzingId, analyzeClip]);
+
+  const handleUpload = useCallback(async (file) => {
+    const uploadId = 'upload';
+    setSelectedClipId(uploadId);
+    setAnalyzingId(uploadId);
     try {
-      const response = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: formData });
-      if (response.ok) {
-        const result = await response.json();
-        applyAnalysisResult(result, { lap: null });
-        return;
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const result = await res.json();
+        setAnalyses(prev => ({ ...prev, [uploadId]: result }));
       }
-      throw new Error(`HTTP ${response.status}`);
-    } catch (err) {
-      setCurrentAnalysis(null);
-      setAlerts(prev => [{
-        id: Date.now(),
-        type: 'warning',
-        title: 'Backend unavailable',
-        subtitle: `Analysis failed (${err.message}). Start the API server on port 8000.`
-      }, ...prev].slice(0, 10));
-    }
-  }, [applyAnalysisResult]);
-
-  const handleClipSelect = useCallback(async (clip) => {
-    setSelectedClip(clip);
-    setCurrentAnalysis({ transcript: '', word_timestamps: [], confidence: null, analyzing: true });
-    const driverChanged = clip.driver_number != null && clip.driver_number !== raceContext?.driver?.number;
-    const sessionChanged = clip.session_key != null && clip.session_key !== raceContext?.session?.session_key;
-    if (driverChanged || sessionChanged) {
-      loadRaceContext(clip.driver_number, clip.session_key);
-    }
-    try {
-      const response = await fetch(`${API_BASE}/api/analyze-sample/${clip.id}`, { method: 'POST' });
-      if (response.ok) {
-        const result = await response.json();
-        applyAnalysisResult(result, { lap: clip.lap_number ?? null, clip });
-      }
-    } catch (err) {
-      console.warn('Clip analysis failed:', err.message);
-      setCurrentAnalysis(null);
-    }
-  }, [applyAnalysisResult, raceContext]);
-
-  const handleLiveSpeechUpdate = useCallback((speechData) => {
-    setCurrentAnalysis(prev => ({
-      ...prev,
-      transcript: speechData.transcript,
-      word_timestamps: speechData.word_timestamps,
-      confidence: speechData.confidence || 95
-    }));
+    } catch (e) { console.warn(e); }
+    finally { setAnalyzingId(null); }
   }, []);
 
-  // Live gauge motion during playback, from the real windowed time series
-  const handlePlaybackProgress = useCallback((curTimeSec) => {
-    if (timeSeries && timeSeries.length > 0) {
-      const point = timeSeries.reduce((prev, curr) =>
-        Math.abs(curr.time - curTimeSec) < Math.abs(prev.time - curTimeSec) ? curr : prev, timeSeries[0]);
-      if (point) {
-        setDriverState({
-          stress: { value: Math.round(point.stress), level: getLevel(point.stress, 'stress') },
-          frustration: { value: Math.round(point.frustration), level: getLevel(point.frustration, 'frustration') },
-          fatigue: { value: Math.round(point.fatigue), level: getLevel(point.fatigue, 'fatigue') },
-          mentalLoad: { value: Math.round(point.mental_load), level: getLevel(point.mental_load, 'mentalLoad') }
-        });
-      }
-    }
-  }, [timeSeries]);
-
-  // ---- Real derived values for header / footer / chart ----
+  // ---- Chart data: real lap times + stress at radio laps ----
   const chartData = useMemo(() => {
-    if (!raceContext?.laps) return [];
-    const ctxKey = `${raceContext.session?.session_key}_${raceContext.driver?.number}`;
-    const pins = stressMap[ctxKey] || {};
-    return raceContext.laps
-      .filter(l => l.lap != null)
-      .map(l => ({
-        lap: l.lap,
-        lapTime: l.pit_out ? null : l.time,
-        stress: pins[l.lap] ?? null
-      }));
-  }, [raceContext, stressMap]);
-
-  const clipPosition = useMemo(() => {
-    if (!selectedClip?.date || !raceContext?.positions?.length) return null;
-    let pos = null;
-    for (const p of raceContext.positions) {
-      if (p.date && p.date <= selectedClip.date) pos = p.position;
-      else break;
+    if (!story?.laps) return [];
+    const stressAt = {};
+    for (const clip of story.clips || []) {
+      const a = analyses[clip.clip_id];
+      if (a && clip.lap != null) {
+        const s = Math.round(a.driver_state?.stress?.score ?? 0);
+        stressAt[clip.lap] = Math.max(stressAt[clip.lap] ?? 0, s);
+      }
     }
-    return pos;
-  }, [selectedClip, raceContext]);
+    return story.laps.map(l => ({
+      lap: l.lap,
+      lapTime: l.pit ? null : l.time,
+      stress: stressAt[l.lap] ?? null
+    }));
+  }, [story, analyses]);
 
-  const clipTyre = useMemo(() => {
-    const lap = selectedClip?.lap_number;
-    if (lap == null || !raceContext?.stints?.length) return null;
-    const stint = raceContext.stints.find(s => s.lap_start != null && lap >= s.lap_start && lap <= (s.lap_end ?? Infinity));
-    if (!stint) return null;
-    return {
-      compound: stint.compound,
-      age: lap - stint.lap_start + (stint.tyre_age_at_start || 0)
-    };
-  }, [selectedClip, raceContext]);
+  const selectedClip = useMemo(() => {
+    if (selectedClipId === 'upload') return null;
+    return story?.clips?.find(c => c.clip_id === selectedClipId) || null;
+  }, [story, selectedClipId]);
 
-  const driver = raceContext?.driver;
-  const teamColour = driver?.team_colour ? `#${driver.team_colour}` : 'var(--accent-red)';
-  const totalLaps = raceContext?.session?.total_laps;
+  const onLapClick = useCallback((lap) => {
+    const clip = story?.clips?.find(c => c.lap === lap);
+    if (clip) handleClipSelect(clip);
+  }, [story, handleClipSelect]);
+
+  const driver = story?.driver;
+  const teamColour = driver?.team_colour ? `#${driver.team_colour.replace('#', '')}` : 'var(--accent-red)';
+  const analyzedCount = story?.clips?.filter(c => analyses[c.clip_id]).length ?? 0;
+  const indexing = isLive && indexStatus && !indexStatus.ready;
+
+  const selStyle = {
+    background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-card)',
+    padding: '7px 10px', borderRadius: '8px', fontSize: '13px', maxWidth: '240px'
+  };
 
   return (
-    <div className="app-container">
-      {/* Slim brand rail — no fake navigation */}
-      <div style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border-card)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '16px' }}>
-        <div style={{ fontWeight: '900', fontSize: '11px', letterSpacing: '3px', color: 'var(--accent-red)', marginBottom: '32px', padding: '8px 0' }}>
-          ⚡PW
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ===== Top bar: brand · race · driver · RUN ===== */}
+      <header style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '14px', borderBottom: '1px solid var(--border-card)', flexShrink: 0, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 900, fontSize: '16px', letterSpacing: '2px', color: 'var(--text-primary)' }}>
+          <span style={{ color: 'var(--accent-red)' }}>⚡ RADIO</span>PIT
         </div>
-        <div style={{ width: '100%', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', color: 'var(--text-primary)', background: 'linear-gradient(90deg, rgba(231,76,60,0.15) 0%, transparent 100%)' }} title="Driver Radio Analysis">
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px', background: 'var(--accent-red)', boxShadow: '0 0 10px var(--accent-red)' }} />
-          <Radio size={22} />
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>The stress-vs-laptime story of any F1 radio</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+          <Flag size={14} color="var(--text-secondary)" />
+          <select style={selStyle} value={raceId || ''} onChange={(e) => setRaceId(e.target.value)} disabled={races.length === 0}>
+            {races.length === 0 && <option value="">{indexing ? `Indexing dataset… ${Math.round((indexStatus?.progress || 0) * 100)}%` : 'Loading races…'}</option>}
+            {races.map(r => (
+              <option key={r.race_id} value={r.race_id}>{r.label} ({r.clip_count} clips)</option>
+            ))}
+          </select>
+
+          <select style={selStyle} value={driverNumber || ''} onChange={(e) => setDriverNumber(e.target.value)} disabled={drivers.length === 0}>
+            {drivers.length === 0 && <option value="">Driver…</option>}
+            {drivers.map(d => (
+              <option key={d.racing_number} value={d.racing_number}>{d.acronym} #{d.racing_number} ({d.clip_count} clips)</option>
+            ))}
+          </select>
+
+          <button
+            onClick={runAll}
+            disabled={!story?.clips?.length || running}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '7px',
+              background: running ? 'rgba(231,76,60,0.35)' : 'var(--accent-red)',
+              color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px',
+              fontWeight: 'bold', letterSpacing: '1px', fontSize: '13px',
+              cursor: story?.clips?.length && !running ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {running
+              ? <><Loader2 size={14} className="spin" /> {runProgress ? `${runProgress.done}/${runProgress.total}` : 'RUNNING'}</>
+              : <><Play size={14} fill="currentColor" /> RUN</>}
+          </button>
+
+          <div title={isLive ? 'Backend connected' : 'Backend offline'} style={{ width: '9px', height: '9px', borderRadius: '50%', background: isLive ? 'var(--accent-teal)' : 'var(--accent-red)', flexShrink: 0 }} />
+        </div>
+      </header>
+
+      {/* ===== Offline / loading states ===== */}
+      {!isLive && (
+        <div style={{ padding: '9px 24px', background: 'rgba(231,76,60,0.08)', borderBottom: '1px solid rgba(231,76,60,0.25)', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <WifiOff size={13} color="var(--accent-red)" />
+          <span><b style={{ color: 'var(--accent-red)' }}>Backend offline.</b> Start it: <code className="mono" style={{ color: 'var(--text-primary)' }}>python -m uvicorn api.main:app --port 8000</code></span>
+        </div>
+      )}
+
+      {/* ===== Main: chart + analysis panel ===== */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '16px', padding: '16px 24px' }}>
+        <div className="card" style={{ flex: 2.2, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '1px' }}>
+              STRESS vs LAP TIME
+              {driver?.full_name && (
+                <span style={{ marginLeft: '10px', fontWeight: 600, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '2px', background: teamColour, marginRight: '5px', verticalAlign: '-1px' }} />
+                  {driver.full_name} · {driver.team} {driver.finish_position ? `· finished P${driver.finish_position}` : ''}
+                </span>
+              )}
+            </h2>
+            <span className="mono" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              {story ? `Best ${fmtLap(story.best_lap?.time)} (L${story.best_lap?.lap ?? '—'}) · ${story.total_laps} laps · ${analyzedCount}/${story.clips.length} radio calls analyzed` : ''}
+            </span>
+          </div>
+
+          {storyLoading ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+              <Loader2 size={22} className="spin" color="var(--accent-red)" />
+              Downloading radio clips (Hugging Face) + official timing (FastF1)…
+              <span style={{ fontSize: '11px', fontStyle: 'italic' }}>first load of a race takes ~30-60s, then it's cached</span>
+            </div>
+          ) : storyError ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-red)', fontSize: '13px', textAlign: 'center', padding: '20px' }}>
+              {String(storyError)}
+            </div>
+          ) : (
+            <StoryChart
+              data={chartData}
+              bestLapTime={story?.best_lap?.time ?? null}
+              onLapClick={onLapClick}
+              selectedLap={selectedClip?.lap ?? null}
+            />
+          )}
+        </div>
+
+        <div className="card" style={{ flex: 1, minWidth: '300px', maxWidth: '380px', display: 'flex', flexDirection: 'column' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, letterSpacing: '1px', marginBottom: '10px', flexShrink: 0 }}>RADIO ANALYSIS</h2>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <AnalysisPanel
+              clip={selectedClip}
+              analysis={analyses[selectedClipId]}
+              analyzing={analyzingId === selectedClipId}
+              apiBase={API_BASE}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-
-        {/* Header — all values real (OpenF1) */}
-        <header style={{ padding: '16px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-card)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <h1 style={{ fontSize: '20px', fontWeight: '700', letterSpacing: '2px' }}>DRIVER RADIO ANALYSIS</h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: isLive ? 'rgba(231, 76, 60, 0.1)' : 'rgba(255,255,255,0.05)', padding: '3px 10px', borderRadius: '12px', border: `1px solid ${isLive ? 'rgba(231, 76, 60, 0.3)' : 'var(--border-card)'}` }}>
-              {isLive
-                ? <div className="pulse" style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--accent-red)' }} />
-                : <WifiOff size={11} color="var(--text-secondary)" />}
-              <span style={{ fontSize: '11px', color: isLive ? 'var(--accent-red)' : 'var(--text-secondary)', fontWeight: 'bold', letterSpacing: '1px' }}>
-                {isLive ? 'LIVE' : 'OFFLINE'}
-              </span>
-            </div>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Real-time insight from every word</span>
-          </div>
-
-          <div style={{ display: 'flex', gap: '24px', fontSize: '13px', color: 'var(--text-secondary)', alignItems: 'center' }}>
-            <div><span style={{ fontSize: '10px', letterSpacing: '1px' }}>SESSION</span><br/><span style={{ color: 'var(--text-primary)', fontWeight: '600' }}>{raceContext?.session?.label || sessionLabel || '—'}</span></div>
-            <div><span style={{ fontSize: '10px', letterSpacing: '1px' }}>RADIO LAP</span><br/><span className="mono" style={{ color: 'var(--text-primary)', fontWeight: '600' }}>{selectedClip?.lap_number != null ? `${selectedClip.lap_number}${totalLaps ? ` / ${totalLaps}` : ''}` : '—'}</span></div>
-            <div><span style={{ fontSize: '10px', letterSpacing: '1px' }}>POSITION</span><br/><span className="mono" style={{ color: 'var(--text-primary)', fontWeight: '700', fontSize: '16px' }}>{clipPosition != null ? `P${clipPosition}` : '—'}</span></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--bg-card)', padding: '6px 14px', borderRadius: '20px', border: '1px solid var(--border-card)' }}>
-              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: teamColour, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: '#fff', fontWeight: 'bold' }}>
-                {driver?.number ?? '–'}
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-primary)', fontWeight: '600', fontSize: '13px' }}>{driver?.full_name || 'Select a radio clip'}</div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{driver?.team || 'Driver context loads from OpenF1'}</div>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Offline notice — no fake demo data */}
-        {!isLive && (
-          <div style={{ padding: '10px 28px', background: 'rgba(231, 76, 60, 0.08)', borderBottom: '1px solid rgba(231, 76, 60, 0.25)', fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <WifiOff size={14} color="var(--accent-red)" />
-            <span><b style={{ color: 'var(--accent-red)' }}>Backend offline.</b> Start it with <code className="mono" style={{ color: 'var(--text-primary)' }}>python -m uvicorn api.main:app --port 8000</code> — this dashboard only shows real analyzed data.</span>
-          </div>
-        )}
-
-        {/* Dashboard Grid */}
-        <div style={{ flex: 1, padding: '20px 28px', overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: 'auto 1fr', gap: '20px', alignContent: 'start' }}>
-
-          <LiveRadio
-            onAudioUpload={handleAudioUpload}
-            isLive={isLive}
-            currentAnalysis={currentAnalysis}
-            onPlaybackProgress={handlePlaybackProgress}
-            onLiveSpeechUpdate={handleLiveSpeechUpdate}
-            clips={sampleClips}
-            sessionLabel={sessionLabel}
-            onClipSelect={handleClipSelect}
-            apiBase={API_BASE}
+      {/* ===== Bottom: clip strip + upload ===== */}
+      <div style={{ padding: '0 24px 14px', flexShrink: 0, display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ClipList
+            clips={story?.clips || []}
+            analyses={analyses}
+            analyzingId={analyzingId}
+            selectedClipId={selectedClipId}
+            onSelect={handleClipSelect}
           />
-
-          <DriverState state={driverState} stressTrend={stressTrend} />
-
-          <AlertsInsights alerts={alerts} stressLevel={driverState.stress.level} stressValue={driverState.stress.value} signals={lastSignals} recommendations={recommendations} />
-
-          <StateChart data={chartData} driverLabel={driver ? `${driver.acronym} #${driver.number}` : null} bestLapTime={raceContext?.best_lap?.time ?? null} />
-
-          <RadioTimeline entries={radioEntries} />
-
         </div>
+        <UploadZone onAudioUpload={handleUpload} />
+      </div>
 
-        {/* Footer — real session data */}
-        <PerformanceBar isLive={isLive} context={raceContext} analyzedLap={selectedClip?.lap_number ?? null} tyre={clipTyre} />
-
+      <div style={{ padding: '6px 24px', borderTop: '1px solid var(--border-card)', fontSize: '10px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span>Audio: HF dataset MikCil/f1-team-radio · Timing: FastF1 (official) · Models: Whisper + wav2vec2 + DistilBERT (Hugging Face)</span>
+        <span className="mono">RADIOPIT</span>
       </div>
     </div>
   );

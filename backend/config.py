@@ -39,10 +39,18 @@ F1_CORNERS = [
 SAMPLE_RATE = 16000
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), 'static', 'clips')
 
-# OpenF1 real team-radio source (https://openf1.org)
-# Race sessions to load: 11342 = 2026 Hungary, 11326 = 2026 Silverstone.
-# Override via env: PITWALL_SESSION_KEYS="11342,11299" (comma-separated)
-_session_env = os.environ.get('PITWALL_SESSION_KEYS', '11342,11326')
+# --- Story mode: HF dataset (MikCil/f1-team-radio) + FastF1 timing ---
+STORY_MAX_CLIPS = 24                # cap clips per race+driver story
+DEFAULT_RACE_ID = '2021_Abu_Dhabi_Grand_Prix'
+
+# Inference backend: 'local' (CPU) or 'modal' (GPU via deployed Modal app).
+# When RADIOPIT_MODAL_URL is set, ASR + acoustic emotion run remotely with
+# automatic local fallback on any error.
+MODAL_URL = os.environ.get('RADIOPIT_MODAL_URL', '').rstrip('/')
+INFERENCE_BACKEND = 'modal' if MODAL_URL else 'local'
+
+# --- Legacy OpenF1 source (kept in repo, not used by the UI) ---
+_session_env = os.environ.get('RADIOPIT_SESSION_KEYS', '11342,11326')
 OPENF1_SESSION_KEYS = [int(s) for s in _session_env.split(',') if s.strip()]
-OPENF1_MAX_CLIPS = 8          # per session
-OPENF1_MAX_PER_DRIVER = 3     # per session
+OPENF1_MAX_CLIPS = 8
+OPENF1_MAX_PER_DRIVER = 3
