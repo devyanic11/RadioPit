@@ -7,6 +7,7 @@ radio message timestamps (UTC) to the lap they were transmitted on.
 import os
 import json
 import datetime
+import re
 import logging
 import sys
 
@@ -39,7 +40,9 @@ class FastF1Timing:
 
     def get_timing(self, race_id, racing_number):
         """Returns {'driver': {...}, 'laps': [...], 'best_lap': {...}, 'total_laps': n}."""
-        cache_file = os.path.join(self.cache_dir, f"{race_id}_{racing_number}.json")
+        # v2: laps carry start_epoch (pandas isoformat can have ns precision that
+        # datetime.fromisoformat cannot parse — epoch floats are unambiguous)
+        cache_file = os.path.join(self.cache_dir, f"{race_id}_{racing_number}_v2.json")
         if os.path.exists(cache_file):
             try:
                 with open(cache_file) as f:
@@ -82,10 +85,18 @@ class FastF1Timing:
                 position = int(lap['Position']) if lap['Position'] == lap['Position'] else None
             except Exception:
                 position = None
+            start_epoch = None
+            if start_date is not None and start_date == start_date:  # not NaT
+                try:
+                    # FastF1 LapStartDate is naive UTC; pandas treats naive as UTC here
+                    start_epoch = float(start_date.timestamp())
+                except Exception:
+                    start_epoch = None
+
             row = {
                 'lap': lap_number,
                 'time': time_s,
-                'start_date': start_date.isoformat() if start_date == start_date else None,
+                'start_epoch': start_epoch,
                 'pit': bool(is_pit),
                 'compound': str(lap['Compound']) if lap['Compound'] == lap['Compound'] else None,
                 'tyre_life': int(lap['TyreLife']) if lap['TyreLife'] == lap['TyreLife'] else None,
@@ -111,24 +122,33 @@ class FastF1Timing:
         return result
 
     @staticmethod
-    def match_clip_to_lap(clip_ts_iso, laps):
-        """Radio at time T belongs to the last lap whose start_date <= T."""
-        if not clip_ts_iso:
+    def _to_epoch(iso_str):
+        """Tolerant ISO -> epoch (UTC). Handles 'Z' suffix and 7-9 fractional digits."""
+        if not iso_str:
             return None
+        s = iso_str.replace('Z', '+00:00')
+        # Trim fractional seconds beyond microseconds (pandas ns precision)
+        s = re.sub(r'(\.\d{6})\d+', r'\1', s)
         try:
-            t = datetime.datetime.fromisoformat(clip_ts_iso.replace('Z', '+00:00')).replace(tzinfo=None)
+            dt = datetime.datetime.fromisoformat(s)
         except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
+
+    @staticmethod
+    def match_clip_to_lap(clip_ts_iso, laps):
+        """Radio at time T belongs to the last lap whose start time <= T."""
+        t = FastF1Timing._to_epoch(clip_ts_iso)
+        if t is None:
             return None
         matched = None
         for lap in laps:
-            sd = lap.get('start_date')
-            if not sd:
-                continue
-            try:
-                start = datetime.datetime.fromisoformat(sd)
-                if start.tzinfo is not None:
-                    start = start.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-            except (ValueError, TypeError):
+            start = lap.get('start_epoch')
+            if start is None:
+                start = FastF1Timing._to_epoch(lap.get('start_date'))  # legacy caches
+            if start is None:
                 continue
             if start <= t:
                 matched = lap

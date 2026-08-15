@@ -131,12 +131,16 @@ def load_story(race_id: str, racing_number: str):
         raise HTTPException(status_code=502, detail=f"Clip download failed: {e}")
 
     story_clips = []
+    matched = 0
     for c in clips:
         lap = FastF1Timing.match_clip_to_lap(c['ts'], t['laps'])
         c['lap'] = lap['lap'] if lap else None
         c['lap_time'] = lap['time'] if lap else None
+        if c['lap'] is not None:
+            matched += 1
         _story_clips[c['clip_id']] = c
         story_clips.append({k: v for k, v in c.items() if k != 'file_path'})
+    logging.info(f"Story {race_id}/{racing_number}: {matched}/{len(clips)} clips matched to laps")
 
     return {
         'race_id': race_id,
