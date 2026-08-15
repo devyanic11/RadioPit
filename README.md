@@ -1,6 +1,6 @@
-# 🏎️ PITWALL — The Silent Co-Driver
+# 🏎️ RadioPit — The Silent Co-Driver
 
-**AI that hears what race engineers miss.** Pitwall analyzes real F1 team-radio audio, measures driver stress / frustration / fatigue / mental load from voice and language, correlates it with real lap times, and tells the engineer what to do about it — all running locally, powered by Hugging Face.
+**AI that hears what race engineers miss.** RadioPit analyzes real F1 team-radio audio, measures driver stress / frustration / fatigue / mental load from voice and language, correlates it with real lap times, and tells the engineer what to do about it — all running locally, powered by Hugging Face.
 
 > Hackathon theme: *Artificial Intelligence in Racing Strategy & Decision-Making — Powered by Hugging Face*
 
@@ -48,7 +48,7 @@ All models download once from the Hugging Face Hub and run **locally on CPU** �
 On first startup the backend pulls **real team-radio clips** and **real lap times, stints and positions** from the free [OpenF1 API](https://openf1.org) — by default two races: **2026 Hungary** and **2026 Silverstone** — and caches everything in `backend/static/clips/` for offline use. Each radio message is matched to the lap it was transmitted on via timestamps, so the mood-vs-lap-performance chart uses genuine data. The UI shows a race tab per session. Switch races with:
 
 ```bash
-PITWALL_SESSION_KEYS="11342,11299" python -m uvicorn api.main:app --port 8000
+RadioPit_SESSION_KEYS="11342,11299" python -m uvicorn api.main:app --port 8000
 # (session keys from https://api.openf1.org/v1/sessions?year=2026&session_name=Race)
 # or at runtime: POST /api/sample-clips/refresh?session_key=...
 ```
