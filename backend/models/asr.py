@@ -39,6 +39,21 @@ class ASREngine:
 
             duration_sec = float(len(audio) / sample_rate)
 
+            # Remote GPU inference (Modal, whisper-large-v3-turbo) when configured
+            from models.remote import modal_transcribe
+            remote = modal_transcribe(audio, sample_rate)
+            if remote and remote.get('text'):
+                return {
+                    'text': remote['text'],
+                    'word_timestamps': remote.get('word_timestamps', []),
+                    'segments': [{'start': w['start'], 'end': w['end'], 'text': w['word']}
+                                 for w in remote.get('word_timestamps', [])],
+                    'language': 'en',
+                    'duration': duration_sec,
+                    'confidence': remote.get('confidence') or 0.9,
+                    'model': remote.get('model', 'modal')
+                }
+
             # High-speed RealtimeSTT faster-whisper transcription
             segments_generator, info = self.model.transcribe(
                 audio, 

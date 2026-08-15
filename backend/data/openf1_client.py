@@ -20,7 +20,7 @@ class OpenF1Client:
     def __init__(self, timeout: int = 15):
         self.timeout = timeout
         self.http = requests.Session()
-        self.http.headers.update({"User-Agent": "Pitwall/1.0 (hackathon demo)"})
+        self.http.headers.update({"User-Agent": "RadioPit/1.0 (hackathon demo)"})
 
     def _get(self, endpoint: str, **params):
         url = f"{OPENF1_BASE}/{endpoint}"

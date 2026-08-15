@@ -19,43 +19,61 @@ MAX_AUDIO_SEC = 30  # radio clips are short; cap inference cost
 
 
 def _build_dimensional_model(model_id):
-    """Custom regression head per the audeering model card."""
+    """audeering emotion model with manual checkpoint loading.
+
+    We avoid `PreTrainedModel.from_pretrained` on a custom subclass because
+    transformers' internals for custom classes change between versions
+    (e.g. `all_tied_weights_keys` in newer releases). Loading the state dict
+    into a plain nn.Module is stable across versions.
+    """
     import torch
     import torch.nn as nn
-    from transformers import Wav2Vec2Processor
-    from transformers.models.wav2vec2.modeling_wav2vec2 import (
-        Wav2Vec2Model,
-        Wav2Vec2PreTrainedModel,
-    )
+    from transformers import Wav2Vec2Processor, Wav2Vec2Config, Wav2Vec2Model
+    from huggingface_hub import hf_hub_download
+
+    # Load checkpoint first so we can infer the head size
+    try:
+        from safetensors.torch import load_file
+        state = load_file(hf_hub_download(model_id, "model.safetensors"))
+    except Exception:
+        state = torch.load(hf_hub_download(model_id, "pytorch_model.bin"),
+                           map_location="cpu", weights_only=True)
+
+    num_labels = state['classifier.out_proj.weight'].shape[0]  # 3: arousal, dominance, valence
+    config = Wav2Vec2Config.from_pretrained(model_id)
+    final_dropout = getattr(config, 'final_dropout', 0.1) or 0.1
 
     class RegressionHead(nn.Module):
-        def __init__(self, config):
+        def __init__(self):
             super().__init__()
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-            self.dropout = nn.Dropout(config.final_dropout)
-            self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+            self.dropout = nn.Dropout(final_dropout)
+            self.out_proj = nn.Linear(config.hidden_size, num_labels)
 
-        def forward(self, features, **kwargs):
+        def forward(self, features):
             x = self.dropout(features)
             x = torch.tanh(self.dense(x))
             x = self.dropout(x)
             return self.out_proj(x)
 
-    class EmotionModel(Wav2Vec2PreTrainedModel):
-        def __init__(self, config):
-            super().__init__(config)
-            self.config = config
+    class EmotionModel(nn.Module):
+        def __init__(self):
+            super().__init__()
             self.wav2vec2 = Wav2Vec2Model(config)
-            self.classifier = RegressionHead(config)
-            self.init_weights()
+            self.classifier = RegressionHead()
 
         def forward(self, input_values):
             hidden_states = self.wav2vec2(input_values)[0]
             pooled = torch.mean(hidden_states, dim=1)
             return self.classifier(pooled)
 
+    model = EmotionModel()
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    core_missing = [k for k in missing if not k.endswith('masked_spec_embed')]
+    if len(core_missing) > 10:
+        raise RuntimeError(f"Emotion checkpoint mismatch: {len(core_missing)} missing keys, e.g. {core_missing[:3]}")
+
     processor = Wav2Vec2Processor.from_pretrained(model_id)
-    model = EmotionModel.from_pretrained(model_id)
     model.eval()
     return processor, model
 
@@ -97,6 +115,20 @@ class AcousticAnalyzer:
         audio_array = np.asarray(audio_array, dtype=np.float32)
         if len(audio_array) > MAX_AUDIO_SEC * sample_rate:
             audio_array = audio_array[:MAX_AUDIO_SEC * sample_rate]
+
+        # Remote GPU inference (Modal) when configured
+        try:
+            from models.remote import modal_emotion
+            remote = modal_emotion(audio_array, sample_rate)
+            if remote and 'arousal' in remote:
+                return {
+                    'arousal': float(remote['arousal']),
+                    'valence': float(remote['valence']),
+                    'dominance': float(remote['dominance']),
+                    'model_tier': 'dimensional (audeering, Modal GPU)'
+                }
+        except Exception:
+            pass
 
         if self.tier == 'dimensional':
             try:

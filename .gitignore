@@ -1,25 +1,139 @@
+# ========================
 # Dependencies
+# ========================
 node_modules/
-frontend/node_modules/
 
-# Python cache & virtual environments
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
+# Python virtual environments
 .venv/
 venv/
 env/
+.env/
 
-# Build outputs
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ========================
+# Frontend build outputs
+# ========================
 frontend/dist/
 frontend/build/
+frontend/dist-ssr/
+*.local
 
-# Temporary files & logs
-backend/static/uploads/
+# ========================
+# Environment variables
+# ========================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+backend/.env
+frontend/.env
+
+# ========================
+# Logs
+# ========================
 *.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========================
+# OS generated files
+# ========================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
+
+# ========================
+# IDE / Editor
+# ========================
 .vscode/
 .idea/
+*.swp
+*.swo
+*.swn
+*~
+*.sublime-project
+*.sublime-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ========================
+# ML / Data / Models
+# ========================
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.pickle
+*.joblib
+*.safetensors
+backend/models/*.bin
+backend/data/cache/
+
+# ========================
+# Audio files (generated)
+# ========================
+backend/audio/output/
+backend/static/uploads/
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# ========================
+# FastF1 cache
+# ========================
+backend/.cache/
+ff1_cache/
+f1_cache/
+
+# ========================
+# Project-specific
+# ========================
+backend/.agents/
+frontend/.agents/
+frontend/.cache/
+docs/
+
+# ========================
+# Misc
+# ========================
+*.bak
+*.tmp
+*.temp
+.ipynb_checkpoints/
